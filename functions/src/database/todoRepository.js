@@ -71,28 +71,33 @@ const isExisted = async (id) => {
  * @returns {Promise<[{title: string, completed: boolean, id: string}, {title: string, completed: boolean, id: string}]>}
  */
 const updateMany = async (data) => {
+    let updatedDocs = [];
+
     await db.runTransaction(async (transaction) => {
         // Read
-        const docArray = [];
-        for (const { id } of data) {
-            const dataRef = todosRef.doc(id);
-            await transaction.get(dataRef);
-            docArray.push(dataRef);
-        }
+        const operations = await Promise.all(
+            data.map(async ({ id }) => {
+                const docRef = todosRef.doc(id);
+                const docSnapshot = await transaction.get(docRef);
+                return { docRef, docSnapshot };
+            })
+        );
 
         // Write
-        for (let i = 0; i < data.length; i++) {
-            const { id, ...updateData } = data[i];
-            transaction.update(docArray[i], updateData);
-        }
+        operations.forEach(({ docRef }, index) => {
+            const { id, ...updateData } = data[index];
+            transaction.update(docRef, updateData);
+        });
+
+        // Prepare updated documents
+        updatedDocs = operations.map(({ docSnapshot }, index) => ({
+            id: data[index].id,
+            ...docSnapshot.data(),
+            ...data[index]
+        }));
     })
 
     // Return updated docs
-    const updatedDocs = await Promise.all(
-        data.map(async ({ id }) => {
-            const snapshot = await todosRef.doc(id).get();
-            return { id, ...snapshot.data() };
-        }))
     return updatedDocs;
 }
 
@@ -104,10 +109,11 @@ const updateMany = async (data) => {
 const deleteMany = async (data) => {
     const batch = db.batch();
 
-    for (const id of data) {
+    data.forEach(id => {
         const docRef = todosRef.doc(id);
         batch.delete(docRef);
-    }
+    });
+
 
     await batch.commit();
 }
